@@ -48,7 +48,7 @@ Server.prototype.trackConnection = function(connection){
  * @param  {Function} initializeClient Callback that is being used for initialization of the client
  */
 Server.prototype.joinConnection = function(connection, room, initializeClient){
-  this.getData(room, function(error, data){
+  this.getData(room, connection.userid, function(error, data){
     // connect to the room
     connection.join(room);
 
@@ -78,7 +78,7 @@ Server.prototype.joinConnection = function(connection, room, initializeClient){
  * @param  {String}   room     room identifier
  * @param  {Function} callback notifier-callback
  */
-Server.prototype.getData = function(room, callback){
+Server.prototype.getData = function(room, userid, callback){
   var cachedVersion = this.data[room],
       cache = this.data,
       requests = this.requests;
@@ -92,7 +92,7 @@ Server.prototype.getData = function(room, callback){
     // should only happen once
     if(!requests[room]){
       requests[room] = true;
-      this.adapter.getData(room, function(error, data){
+      this.adapter.getData(room, userid, function(error, data){
         cache[room] = {
           registeredSockets: [],
           clientVersions: {},
@@ -117,7 +117,7 @@ Server.prototype.getData = function(room, callback){
 Server.prototype.receiveEdit = function(connection, editMessage, sendToClient){
   // -1) The algorithm actually says we should use a checksum here, I don't think that's necessary
   // 0) get the relevant doc
-  this.getData(editMessage.room, function(err, doc){
+  this.getData(editMessage.room, connection.userid, function(err, doc){
     // 0.a) get the client versions
     var clientDoc = doc.clientVersions[connection.id];
 
@@ -164,7 +164,7 @@ Server.prototype.receiveEdit = function(connection, editMessage, sendToClient){
     }.bind(this));
 
     // 4) save a snapshot of the document
-    this.saveSnapshot(editMessage.room);
+    this.saveSnapshot(editMessage.room, connection.userid);
 
     // notify all sockets about the update, if not empty
     if(editMessage.edits.length > 0){
@@ -175,7 +175,7 @@ Server.prototype.receiveEdit = function(connection, editMessage, sendToClient){
   }.bind(this));
 };
 
-Server.prototype.saveSnapshot = function(room){
+Server.prototype.saveSnapshot = function(room, userid){
   var noRequestInProgress = !this.saveRequests[room],
       checkQueueAndSaveAgain = function(){
         // if another save request is in the queue, save again
@@ -183,7 +183,7 @@ Server.prototype.saveSnapshot = function(room){
         this.saveRequests[room] = false;
         if(anotherRequestScheduled){
           this.saveQueue[room] = false;
-          this.saveSnapshot(room);
+          this.saveSnapshot(room, userid);
         }
       }.bind(this);
 
@@ -191,10 +191,10 @@ Server.prototype.saveSnapshot = function(room){
   if(noRequestInProgress){
     this.saveRequests[room] = true;
     // get data for saving
-    this.getData(room, function(err, data){
+    this.getData(room, userid, function(err, data){
       // store data
       if(!err && data){
-        this.adapter.storeData(room, data.serverCopy, checkQueueAndSaveAgain);
+        this.adapter.storeData(room, userid, data.serverCopy, checkQueueAndSaveAgain);
       }else{
         checkQueueAndSaveAgain();
       }
