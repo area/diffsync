@@ -196,7 +196,7 @@ Server.prototype.receiveEdit = function(connection, editMessage, sendToClient) {
     }.bind(this));
 
     // 4) save a snapshot of the document
-    this.saveSnapshot(editMessage.room, connection.userid);
+    this.saveSnapshot(editMessage.room, editMessage.edits, connection.userid);
 
     // notify all sockets about the update, if not empty
     if (editMessage.edits.length > 0) {
@@ -207,7 +207,7 @@ Server.prototype.receiveEdit = function(connection, editMessage, sendToClient) {
   }.bind(this));
 };
 
-Server.prototype.saveSnapshot = function(room, userid) {
+Server.prototype.saveSnapshot = function(room, edits, userid) {
   var noRequestInProgress = !this.saveRequests[room],
     checkQueueAndSaveAgain = function() {
       // if another save request is in the queue, save again
@@ -215,7 +215,7 @@ Server.prototype.saveSnapshot = function(room, userid) {
       this.saveRequests[room] = false;
       if (anotherRequestScheduled) {
         this.saveQueue[room] = false;
-        this.saveSnapshot(room, userid);
+        this.saveSnapshot(room, edits, userid);
       }
     }.bind(this);
 
@@ -226,7 +226,7 @@ Server.prototype.saveSnapshot = function(room, userid) {
     this.getData(room, userid, function(err, data) {
       // store data
       if (!err && data) {
-        this.adapter.storeData(room, userid, data.serverCopy, checkQueueAndSaveAgain);
+        this.adapter.storeData(room, userid, data.serverCopy, edits, checkQueueAndSaveAgain);
       } else {
         checkQueueAndSaveAgain();
       }
