@@ -147,63 +147,71 @@ Server.prototype.getData = function(room, userid, callback) {
  * @param  {Function} sendToClient The callback that sends the server changes back to the client
  */
 Server.prototype.receiveEdit = function(connection, editMessage, sendToClient) {
-  // -1) The algorithm actually says we should use a checksum here, I don't think that's necessary
-  // 0) get the relevant doc
   this.getData(editMessage.room, connection.userid, function(err, doc) {
-    // 0.a) get the client versions
-    var clientDoc = doc.clientVersions[connection.id];
+    if (doc) {
+      this.adapter.checkDiffs(editMessage, doc, function(err, res) {
+        if (res) {
+          // -1) The algorithm actually says we should use a checksum here, I don't think that's necessary
+          // 0) get the relevant doc
+          // 0.a) get the client versions
+          var clientDoc = doc.clientVersions[connection.id];
 
-    // no client doc could be found, client needs to re-auth
-    if (err || !clientDoc) {
-      connection.emit(COMMANDS.error, 'Need to re-connect!');
-      return;
-    }
+          // no client doc could be found, client needs to re-auth
+          if (err || !clientDoc) {
+            connection.emit(COMMANDS.error, 'Need to re-connect!');
+            return;
+          }
 
-    // when the versions match, remove old edits stack
-    if (editMessage.serverVersion === clientDoc.shadow.serverVersion) {
-      clientDoc.edits = [];
-    }
+          // when the versions match, remove old edits stack
+          if (editMessage.serverVersion === clientDoc.shadow.serverVersion) {
+            clientDoc.edits = [];
+          }
 
-    // 1) iterate over all edits
-    editMessage.edits.forEach(function(edit) {
-      // 2) check the version numbers
-      if (edit.serverVersion === clientDoc.shadow.serverVersion &&
-        edit.localVersion === clientDoc.shadow.localVersion) {
-        // versions match
-        // backup! TODO: is this the right place to do that?
-        clientDoc.backup.doc = utils.deepCopy(clientDoc.shadow.doc);
+          // 1) iterate over all edits
+          editMessage.edits.forEach(function(edit) {
+            // 2) check the version numbers
+            if (edit.serverVersion === clientDoc.shadow.serverVersion &&
+              edit.localVersion === clientDoc.shadow.localVersion) {
+              // versions match
+              // backup! TODO: is this the right place to do that?
+              clientDoc.backup.doc = utils.deepCopy(clientDoc.shadow.doc);
 
-        // 3) patch the shadow
-        // var snapshot = utils.deepCopy(clientDoc.shadow.doc);
-        this.jsondiffpatch.patch(clientDoc.shadow.doc, utils.deepCopy(edit.diff));
-        // clientDoc.shadow.doc = snapshot;
+              // 3) patch the shadow
+              // var snapshot = utils.deepCopy(clientDoc.shadow.doc);
+              this.jsondiffpatch.patch(clientDoc.shadow.doc, utils.deepCopy(edit.diff));
+              // clientDoc.shadow.doc = snapshot;
 
-        // apply the patch to the server's document
-        // snapshot = utils.deepCopy(doc.serverCopy);
-        this.jsondiffpatch.patch(doc.serverCopy, utils.deepCopy(edit.diff));
-        // doc.serverCopy = snapshot;
+              // apply the patch to the server's document
+              // snapshot = utils.deepCopy(doc.serverCopy);
+              this.jsondiffpatch.patch(doc.serverCopy, utils.deepCopy(edit.diff));
+              // doc.serverCopy = snapshot;
 
-        // 3.a) increase the version number for the shadow if diff not empty
-        if (!isEmpty(edit.diff)) {
-          clientDoc.shadow.localVersion++;
+              // 3.a) increase the version number for the shadow if diff not empty
+              if (!isEmpty(edit.diff)) {
+                clientDoc.shadow.localVersion++;
+              }
+            } else {
+              // TODO: implement backup workflow
+              // has a low priority since `packets are not lost` - but don't quote me on that :P
+              console.log('error', 'patch rejected!!', edit.serverVersion, '->', clientDoc.shadow.serverVersion, ':',
+                edit.localVersion, '->', clientDoc.shadow.localVersion);
+            }
+          }.bind(this));
+
+          // 4) save a snapshot of the document
+          this.saveSnapshot(editMessage.room, editMessage.edits, connection.userid);
+
+          // notify all sockets about the update, if not empty
+          if (editMessage.edits.length > 0) {
+            this.transport.to(editMessage.room).emit(COMMANDS.remoteUpdateIncoming, connection.id);
+          }
+
+          this.sendServerChanges(doc, clientDoc, sendToClient);
+        } else {
+          //Do nothing - something in those diffs isn't allowed.
         }
-      } else {
-        // TODO: implement backup workflow
-        // has a low priority since `packets are not lost` - but don't quote me on that :P
-        console.log('error', 'patch rejected!!', edit.serverVersion, '->', clientDoc.shadow.serverVersion, ':',
-          edit.localVersion, '->', clientDoc.shadow.localVersion);
-      }
-    }.bind(this));
-
-    // 4) save a snapshot of the document
-    this.saveSnapshot(editMessage.room, editMessage.edits, connection.userid);
-
-    // notify all sockets about the update, if not empty
-    if (editMessage.edits.length > 0) {
-      this.transport.to(editMessage.room).emit(COMMANDS.remoteUpdateIncoming, connection.id);
+      }.bind(this));
     }
-
-    this.sendServerChanges(doc, clientDoc, sendToClient);
   }.bind(this));
 };
 
