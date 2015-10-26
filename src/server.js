@@ -221,6 +221,20 @@ Server.prototype.receiveEdit = function(connection, editMessage, sendToClient) {
   }.bind(this));
 };
 
+Server.prototype.updateEveryone = function(room, userid, callback) {
+  this.adapter.getData(room, userid, function(error, data) {
+    if (!this.data[room]) {
+      this.data[room] = {
+        registeredSockets: [],
+        clientVersions: {},
+      };
+    }
+    this.data[room].serverCopy = data;
+    this.transport.to(room).emit(COMMANDS.remoteUpdateIncoming, null);
+    callback();
+  }.bind(this));
+};
+
 Server.prototype.saveSnapshot = function(room, edits, userid) {
   var noRequestInProgress = !this.saveRequests[room],
     checkQueueAndSaveAgain = function() {
